@@ -1,0 +1,29 @@
+# Quartus build output (regenerated on every compile)
+quartus/db/
+quartus/incremental_db/
+quartus/output_files/
+quartus/simulation/
+quartus/greybox_tmp/
+quartus/qdb/
+quartus/tmp-clearbox/
+quartus/*.qws
+quartus/*.rpt
+quartus/*.summary
+quartus/*.smsg
+quartus/*.done
+quartus/*.jdi
+quartus/*.pin
+quartus/*.sld
+*.bak
+
+# Simulation output
+sim_out/
+work/
+transcript
+*.vcd
+*.wlf
+*.vvp
+
+# Python
+__pycache__/
+*.pyc
