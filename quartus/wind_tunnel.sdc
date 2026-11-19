@@ -8,3 +8,7 @@ derive_clock_uncertainty
 # (synchronized inside the design), so don't time them.
 set_false_path -from [get_ports {SW[*] KEY[*] FAN_TACH}]
 set_false_path -to   [get_ports {LEDR[*] HEX*[*] FAN_PWM}]
+
+# VGA: all outputs are registered and change once per 40 ns pixel; VGA_CLK
+# rises mid-pixel (see vga_timing.v), leaving ~20 ns of margin each side.
+set_false_path -to   [get_ports {VGA_R[*] VGA_G[*] VGA_B[*] VGA_CLK VGA_HS VGA_VS VGA_BLANK_N VGA_SYNC_N}]

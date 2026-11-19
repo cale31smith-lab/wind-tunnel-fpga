@@ -53,8 +53,14 @@ class FixedPID:
         return self.duty, e, self.integ
 
 
+# Measured on our fan (M1 sweep, Nov 19 2026): duty % -> steady-state RPM.
+# Source: data/m1_fan_curve.csv
+MEASURED_DUTY = [20, 30, 40, 50, 60, 70, 80, 90, 100]
+MEASURED_RPM = [379, 576, 760, 929, 1090, 1240, 1372, 1505, 1630]
+
+
 class NoctuaFan:
-    """First-order model of the NF-P12 redux-1700 PWM (same as tb/fan_model.v)."""
+    """First-order model of OUR NF-P12 redux-1700 PWM, using the measured curve."""
 
     def __init__(self, tau_s=0.6, rpm=0.0):
         self.tau_s = tau_s
@@ -62,10 +68,15 @@ class NoctuaFan:
 
     @staticmethod
     def target(duty):
-        frac = duty / 2000.0
-        if frac >= 0.2:
-            return 550.0 + (frac - 0.2) * (1700.0 - 550.0) / 0.8
-        return 550.0 * frac / 0.2
+        pct = duty / 20.0                      # PWM counts -> percent
+        if pct <= MEASURED_DUTY[0]:            # below 20%: scale toward 0
+            return MEASURED_RPM[0] * pct / MEASURED_DUTY[0]
+        for i in range(1, len(MEASURED_DUTY)):  # linear interpolation
+            if pct <= MEASURED_DUTY[i]:
+                d0, d1 = MEASURED_DUTY[i - 1], MEASURED_DUTY[i]
+                r0, r1 = MEASURED_RPM[i - 1], MEASURED_RPM[i]
+                return r0 + (r1 - r0) * (pct - d0) / (d1 - d0)
+        return MEASURED_RPM[-1]
 
     def step(self, duty, dt=TICK_S):
         self.rpm += (self.target(duty) - self.rpm) * dt / self.tau_s

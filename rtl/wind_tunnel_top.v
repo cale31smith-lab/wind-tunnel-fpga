@@ -8,8 +8,10 @@
 //        2 tach pulses per revolution, open-collector tach)
 //
 // ---------------------------------------------------------------------------
-// MILESTONE M1 (this version): open-loop fan control + live RPM readout
+// THIS VERSION: M1 (open-loop fan control + RPM) + M2 (VGA live graph)
 //   SW[6:0]  = duty cycle in percent (0..99, values above 99 clamp to 99)
+//   SW[7]    = VGA test pattern (color bars) - use for monitor bring-up
+//   SW[8]    = pause/freeze the VGA graph
 //   SW[9]    = force 100% (full speed)
 //   KEY[0]   = reset (active-low, course convention)
 //   HEX3..0  = measured RPM (leading zeros blanked, updates 4x per second)
@@ -17,11 +19,12 @@
 //   LEDR[0]  = filtered tach signal (flickers when the fan spins)
 //   LEDR[1]  = fan stalled / no tach signal
 //   LEDR[2]  = toggles every new RPM measurement
+//   LEDR[7]  = test pattern on      LEDR[8] = graph paused
 //   LEDR[9]  = PWM output (brightness roughly follows duty)
+//   VGA      = 640x480 scrolling graph, 32 s window, 1 px = 4 RPM
 //
-// Planned later milestones plug in where marked "M2+" below:
-//   M2: vga_timing + stripchart      M3: pid_controller + mode_fsm
-//   M4: step_test                    M5: autotune
+// Later milestones plug in where marked "M3+" below:
+//   M3: pid_controller + mode_fsm    M4: step_test    M5: autotune
 // ============================================================================
 module wind_tunnel_top #(
 	// 0 = FPGA pin drives the fan's PWM wire directly (push-pull, Noctua's
@@ -30,7 +33,8 @@ module wind_tunnel_top #(
 	// 1 = external NPN/N-MOSFET stage between the FPGA and the fan (needed if
 	//     the fan pulls PWM up to 5 V). The transistor inverts, so we invert.
 	parameter PWM_INVERT    = 1'b0,
-	parameter DISPLAY_TICKS = 12500000   // 4 Hz display refresh at 50 MHz
+	parameter DISPLAY_TICKS = 12500000,  // 4 Hz display refresh at 50 MHz
+	parameter SAMPLE_TICKS  = 2500000    // 20 Hz graph samples (640 = 32 s)
 )(
 	//////////// CLOCK //////////
 	input         CLOCK_50,
@@ -81,7 +85,7 @@ begin
 		duty_pct = SW[6:0];
 
 	duty = duty_pct * 11'd20;
-	// M2+: in closed-loop mode this becomes the PID controller's output
+	// M3+: in closed-loop mode this becomes the PID controller's output
 end
 
 /* ---------------- PWM generator ---------------- */
@@ -167,18 +171,72 @@ assign HEX5 = (SW[9] == 1'b1) ? seg_F : pct_dig1;
 assign LEDR[0]   = tach_clean;
 assign LEDR[1]   = stalled;
 assign LEDR[2]   = meas_led;
-assign LEDR[8:3] = 6'd0;
+assign LEDR[6:3] = 4'd0;
+assign LEDR[7]   = SW[7];
+assign LEDR[8]   = SW[8];
 assign LEDR[9]   = pwm;
 
-/* ---------------- VGA: idle until M2 ---------------- */
-// M2+: replace with vga_timing + stripchart outputs
-assign VGA_R       = 8'd0;
-assign VGA_G       = 8'd0;
-assign VGA_B       = 8'd0;
-assign VGA_CLK     = 1'b0;
-assign VGA_HS      = 1'b1;
-assign VGA_VS      = 1'b1;
-assign VGA_BLANK_N = 1'b0;
-assign VGA_SYNC_N  = 1'b0;
+/* ---------------- M2: VGA live graph ---------------- */
+/* graph sample rate: one sample every SAMPLE_TICKS clocks (20 Hz) */
+reg [21:0] sample_cnt;
+reg        sample_tick;
+always @(posedge clk or negedge rst)
+begin
+	if (rst == 1'b0)
+	begin
+		sample_cnt  <= 22'd0;
+		sample_tick <= 1'b0;
+	end
+	else if (sample_cnt == SAMPLE_TICKS - 1)
+	begin
+		sample_cnt  <= 22'd0;
+		sample_tick <= 1'b1;
+	end
+	else
+	begin
+		sample_cnt  <= sample_cnt + 22'd1;
+		sample_tick <= 1'b0;
+	end
+end
+
+wire       pix_en, vga_hs_raw, vga_vs_raw, vga_active;
+wire [9:0] vga_x, vga_y;
+
+vga_timing u_vga (
+	.clk    (clk),
+	.rst    (rst),
+	.pix_en (pix_en),
+	.hsync  (vga_hs_raw),
+	.vsync  (vga_vs_raw),
+	.active (vga_active),
+	.x      (vga_x),
+	.y      (vga_y)
+);
+
+stripchart u_chart (
+	.clk          (clk),
+	.rst          (rst),
+	.pix_en       (pix_en),
+	.active       (vga_active),
+	.hsync_in     (vga_hs_raw),
+	.vsync_in     (vga_vs_raw),
+	.x            (vga_x),
+	.y            (vga_y),
+	.sample_tick  (sample_tick),
+	.pause        (SW[8]),
+	.test_pattern (SW[7]),
+	.show_set     (1'b0),        // M3+: 1 in closed-loop mode
+	.meas_rpm     (rpm),
+	.set_rpm      (16'd0),       // M3+: PID setpoint
+	.r            (VGA_R),
+	.g            (VGA_G),
+	.b            (VGA_B),
+	.hsync_out    (VGA_HS),
+	.vsync_out    (VGA_VS),
+	.blank_n      (VGA_BLANK_N)
+);
+
+assign VGA_CLK    = pix_en;      // rising edge lands mid-pixel (see vga_timing.v)
+assign VGA_SYNC_N = 1'b0;        // no sync-on-green
 
 endmodule
